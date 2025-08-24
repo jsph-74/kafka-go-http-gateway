@@ -94,7 +94,8 @@ cleanup_resources() {
     if [ "$CLEANUP_DONE" = "true" ]; then
         return 0
     fi
-    
+    CLEANUP_DONE=true
+
     print_step "Cleaning up resources (stopping all consumers)..."
     docker-compose -f $DOCKER_COMPOSE_FILE up -d --scale go-consumer="0"
     sleep 3
@@ -116,7 +117,6 @@ cleanup_resources() {
         --delete --topic "$TOPIC_NAME" 2>/dev/null || true
     print_success "Resource cleanup completed"
 
-    CLEANUP_DONE=true
 }
 
 # Trap multiple signals including Ctrl+C (SIGINT) and SIGTERM
