@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(docker-compose ps)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+      "Bash(./test.sh)",
+      "Bash(./test/test.sh:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(./test/producer_e2e_test.sh:*)",
+      "Bash(./test/consumer_e2e_test.sh:*)",
+      "Bash(docker-compose exec:*)",
+      "Bash(docker build:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(go test:*)",
+      "Bash(mkdir:*)",
+      "Bash(docker run:*)",
+      "Bash(docker-compose build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

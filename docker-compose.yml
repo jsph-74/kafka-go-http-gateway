@@ -1,0 +1,101 @@
+x-kafka-common: &kafka-common
+  image: confluentinc/cp-kafka:6.1.1
+  depends_on:
+    - zk
+  environment: &kafka-common-env
+    KAFKA_ZOOKEEPER_CONNECT: 'zk:2181'
+    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+    KAFKA_MIN_INSYNC_REPLICAS: 2
+    KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+    KAFKA_NUM_PARTITIONS: 15
+
+services:
+  zk:
+    image: confluentinc/cp-zookeeper:6.1.1
+    hostname: zk
+    container_name: zk
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  broker0:
+    <<: *kafka-common
+    hostname: broker0
+    container_name: broker0
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+    environment:
+      <<: *kafka-common-env
+      KAFKA_BROKER_ID: 0
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker0:29092,PLAINTEXT_HOST://localhost:9092
+
+  broker1:
+    <<: *kafka-common
+    hostname: broker1
+    container_name: broker1
+    ports:
+      - "29093:29093"
+      - "9093:9093"
+    environment:
+      <<: *kafka-common-env
+      KAFKA_BROKER_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker1:29093,PLAINTEXT_HOST://localhost:9093
+
+  broker2:
+    <<: *kafka-common
+    hostname: broker2
+    container_name: broker2
+    ports:
+      - "29094:29094"
+      - "9094:9094"
+    environment:
+      <<: *kafka-common-env
+      KAFKA_BROKER_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker2:29094,PLAINTEXT_HOST://localhost:9094
+
+  cli-tools:
+    image: confluentinc/cp-kafka:6.1.1
+    container_name: cli-tools
+    entrypoint: "sleep infinity"
+    restart: always
+
+  go-producer:
+    build:
+      context: .
+      dockerfile: producer.Dockerfile
+    container_name: go-producer
+    hostname: go-producer
+    depends_on:
+      - broker0
+      - broker1
+      - broker2
+      - zk
+      - cli-tools
+    ports:
+      - "6969:6969"
+    environment:
+      - GO_APP_PORT=:6969
+      - BROKER=broker0:29092
+
+  go-consumer:
+    build:
+      context: .
+      dockerfile: consumer.Dockerfile
+    container_name: go-consumer
+    hostname: go-consumer
+    depends_on:
+      - broker0
+      - broker1
+      - broker2
+      - zk
+      - cli-tools
+    volumes:
+      - ./src/consumer:/app
+    working_dir: /app
+    environment:
+      - BROKER=broker0:29092
+    entrypoint: ["sleep", "infinity"]
+

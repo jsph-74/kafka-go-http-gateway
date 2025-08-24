@@ -1,0 +1,12 @@
+FROM golang:1.24
+
+RUN apt-get update && apt-get upgrade -y
+RUN apt-get install -y nano
+
+WORKDIR /usr/src/app
+
+RUN go install github.com/air-verse/air@latest
+
+ENV GO_APP_PORT=:6969
+
+ENTRYPOINT ["/go/bin/air"]
