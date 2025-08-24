@@ -52,17 +52,17 @@ kafka-go-http-gateway/
 ├── CLAUDE.md                          # Development guidelines for Claude Code
 └── src/
     ├── producer/                      # HTTP-to-Kafka producer service
-    │   ├── main.go, pkg/               # Gin web API implementation
-    │   └── test/                       # Container-based unit/integration/E2E tests
-    │       ├── test.sh                 # Run all tests in containers
-    │       ├── producer_e2e_test.sh    # End-to-end HTTP → Kafka pipeline
-    │       └── *_test.go               # Unit & integration tests
+    │   ├── main.go, pkg/              # Gin web API implementation
+    │   └── test/                      # Container-based unit/integration/E2E tests
+    │       ├── test.sh                # Run all tests in containers
+    │       ├── producer_e2e_test.sh   # End-to-end HTTP → Kafka pipeline
+    │       └── *_test.go              # Unit & integration tests
     └── consumer/                      # Kafka-to-HTTP consumer CLI
-        ├── main.go, pkg/               # Consumer & worker implementation
-        └── test/                       # Container-based test suite
-            ├── test.sh                 # Run all tests in containers
-            ├── consumer_e2e_test.sh    # End-to-end Kafka → HTTP pipeline
-            └── *_test.go               # Unit & integration tests
+        ├── main.go, pkg/              # Consumer & worker implementation
+        └── test/                      # Container-based test suite
+            ├── test.sh                # Run all tests in containers
+            ├── consumer_e2e_test.sh   # End-to-end Kafka → HTTP pipeline
+            └── *_test.go              # Unit & integration tests
 ```
 
 ## 🚀 Quick Start
@@ -71,32 +71,40 @@ kafka-go-http-gateway/
 
 ### 1. Bootstrap Infrastructure
 ```bash
-./bin/reboot.sh                    # Clean rebuild: down → build → up → logs
-# Wait for "HTTP consumer stopped successfully" indicating Kafka is ready
+# Clean rebuild: down → build → up → logs
+# Wait until the go-producer has connected to kafka, indicating Kafka is ready
+./bin/reboot.sh 
 ```
 
 ### 2. Run Complete Test Suite  
 ```bash
-./bin/enchilada.sh                 # Full E2E pipeline: Producer → Kafka → Consumer
+# Full E2E pipeline: Producer → Kafka → Consumer
+./bin/enchilada.sh 
 ```
 
 ### 3. Individual Testing (Optional)
 
 **Producer Tests** (from `src/producer/`):
 ```bash
-./test/test.sh                                                          # Unit & integration tests
-./test/producer_e2e_test.sh localhost:6969 broker0:29092 test-topic 5   # E2E HTTP → Kafka
+# Unit & integration tests
+./test/test.sh 
+
+# E2E HTTP → Kafka
+./test/producer_e2e_test.sh localhost:6969 broker0:29092 test-topic 5   
 ```
 
 **Consumer Tests** (from `src/consumer/`):  
 ```bash
-./test/test.sh                                                          # Unit & integration tests  
+# Unit & integration tests  
+./test/test.sh 
+
+# E2EKafka → HTTP  
 ./test/consumer_e2e_test.sh broker0:29092 test-topic http://go-producer:6969/webhook-simulator 30 3 2.0
 ```
 
 **Manual E2E Pipeline:**
 ```bash
-# Step 1: Send messages to Kafka
+# Step 1: Send 10 messages to Kafka
 cd src/producer
 ./test/producer_e2e_test.sh localhost:6969 broker0:29092 test-topic 10
 
@@ -117,7 +125,9 @@ POST http://localhost:6969/produce
 }
 
 GET http://localhost:6969/health
-POST http://localhost:6969/webhook-simulator  # Test endpoint with realistic errors
+
+# Test consumer url, simulating realistic errors and delays
+POST http://localhost:6969/webhook-simulator  
 ```
 
 **Kafka Consumer CLI:**
