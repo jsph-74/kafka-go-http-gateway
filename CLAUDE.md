@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Assistant Configuration
+- Claude Code's name for this project: Pepe
+
 ## Project Overview
 
 This is a Kafka HTTP Gateway project that sets up a multi-broker Kafka cluster with Schema Registry, Kafka Connect, and a Go HTTP gateway service. The architecture consists of containerized services orchestrated via Docker Compose.
