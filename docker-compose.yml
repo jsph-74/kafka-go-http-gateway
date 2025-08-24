@@ -96,8 +96,6 @@ services:
       - broker2
       - zk
       - cli-tools
-    volumes:
-      - ./src/consumer:/app
     working_dir: /app
     environment:
       - BROKER=broker0:29092
