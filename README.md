@@ -74,12 +74,14 @@ kafka-go-http-gateway/
 ### 1. Bootstrap Infrastructure
 ```bash
 # Clean rebuild: down → build → up → logs
-# Wait until the go-producer has connected to kafka, indicating Kafka is ready
+# Wait until the go-producer has connected to Kafka, 
+# indicating the cluster is ready
 ./bin/reboot.sh 
 ```
 
 ### 2. Run Complete Test Suite  
 ```bash
+# All unit and integrations tests
 # Full E2E pipeline: Producer → Kafka → Consumer
 ./bin/enchilada.sh 
 ```
@@ -98,10 +100,9 @@ POST http://localhost:6969/produce
 
 GET http://localhost:6969/health
 
-# Test consumer url, simulating realistic errors and delays
 POST http://localhost:6969/webhook-simulator  
 ```
-Please note, the webhook simulates failures and delays
+Please note: the webhook simulates failures and delays
 
 **Kafka Consumer CLI:**
 ```bash
