@@ -17,6 +17,6 @@
 
 (
     cd src/consumer
-    # ./test/consumer_e2e_test.sh <broker_address> <topic_name> <target_url> [duration] [workers] [rate_limit]
-    ./test/consumer_e2e_test.sh broker0:29092 test-topic http://go-producer:6969/webhook-simulator 60 15 10
+    # ./test/consumer_e2e_test.sh <broker_address> <topic_name> <target_url> [duration] [instances] [rate_limit]
+    ./test/consumer_e2e_test.sh broker0:29092 test-topic http://go-producer:6969/webhook-simulator 60 15 10.0
 )

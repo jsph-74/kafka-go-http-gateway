@@ -80,12 +80,16 @@ services:
       - GO_APP_PORT=:6969
       - BROKER=broker0:29092
 
+  # Single consumer for development and testing
+  # For native Kafka scaling in production:
+  # 1. Run: docker-compose up --scale go-consumer=N (where N = number of partitions for full utilization)
+  # 2. Each instance will join the same consumer group and get partitions distributed automatically
+  # 3. Each instance processes its assigned partitions single-threaded for perfect ordering
+  
   go-consumer:
     build:
       context: .
       dockerfile: consumer.Dockerfile
-    container_name: go-consumer
-    hostname: go-consumer
     depends_on:
       - broker0
       - broker1
@@ -97,5 +101,6 @@ services:
     working_dir: /app
     environment:
       - BROKER=broker0:29092
+      - CONSUMER_GROUP=http-consumer
     entrypoint: ["sleep", "infinity"]
 
