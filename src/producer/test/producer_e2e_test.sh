@@ -116,10 +116,5 @@ for i in $(seq 1 $MESSAGE_COUNT); do
 done
 
 print_success "All $MESSAGE_COUNT messages sent successfully"
-
 print_step "Messages are ready in Kafka topic: $TOPIC_NAME"
 print_success "Producer E2E test completed successfully"
-print_warning "Run consumer_e2e_test.sh next to consume these messages via HTTP consumer"
-echo ""
-echo "Recommended command:"
-echo "cd ../../consumer && ./test/consumer_e2e_test.sh $BROKER_ADDRESS $TOPIC_NAME http://go-producer:6969/webhook-simulator"
