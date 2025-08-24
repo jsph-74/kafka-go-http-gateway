@@ -58,11 +58,9 @@ TARGET_URL="$3"
 DURATION="${4:-60}"
 INSTANCES="${5:-3}"
 RATE_LIMIT="${6:-10.0}"
+DOCKER_COMPOSE_FILE="../../docker-compose.yml"
 
-# Generate consistent consumer group name that we'll use throughout
 CONSUMER_GROUP="e2e-consumer-$(date +%s)"
-
-# Flag to prevent double cleanup
 CLEANUP_DONE=false
 
 # Validate numeric parameters
@@ -93,37 +91,32 @@ echo ""
 
 # Function to cleanup topic and consumer group
 cleanup_resources() {
-    # Prevent double cleanup
     if [ "$CLEANUP_DONE" = "true" ]; then
         return 0
     fi
-    CLEANUP_DONE=true
     
-    print_step "Cleaning up resources (restarting consumer to kill any processes)..."
-    
-    # Restart consumer container to kill any lingering consumer processes
-    docker-compose -f ../../docker-compose.yml restart go-consumer >/dev/null 2>&1
-    
-    # Wait a moment for container to restart and processes to be killed
+    print_step "Cleaning up resources (stopping all consumers)..."
+    docker-compose -f $DOCKER_COMPOSE_FILE up -d --scale go-consumer="0"
     sleep 3
     
-    print_step "Cleaning up consumer group: $CONSUMER_GROUP"
-    # Try to delete the consumer group (should work now that processes are killed)
-    OUTPUT=$(docker-compose -f ../../docker-compose.yml exec -T cli-tools kafka-consumer-groups \
+    print_step "Cleaning up consumer group in kafka: $CONSUMER_GROUP"
+    OUTPUT=$(docker-compose -f $DOCKER_COMPOSE_FILE exec -T cli-tools kafka-consumer-groups \
         --bootstrap-server "$BROKER_ADDRESS" \
         --delete --group "$CONSUMER_GROUP" 2>&1)
     
     if echo "$OUTPUT" | grep -q "Deletion of some consumer groups failed"; then
-        print_warning "Consumer group cleanup skipped (group may still be active - will auto-expire)"
+        print_warning "Consumer group cleanup skipped (the group may still be active because of unstopped consumers)"
     else
         print_success "Consumer group deleted successfully"
     fi
     
     print_step "Cleaning up topic: $TOPIC_NAME"
-    docker-compose -f ../../docker-compose.yml exec -T cli-tools kafka-topics \
+    docker-compose -f $DOCKER_COMPOSE_FILE exec -T cli-tools kafka-topics \
         --bootstrap-server "$BROKER_ADDRESS" \
         --delete --topic "$TOPIC_NAME" 2>/dev/null || true
     print_success "Resource cleanup completed"
+
+    CLEANUP_DONE=true
 }
 
 # Trap multiple signals including Ctrl+C (SIGINT) and SIGTERM
@@ -133,14 +126,12 @@ trap cleanup_resources EXIT INT TERM
 print_step "Checking if topic exists: $TOPIC_NAME"
 
 # First check if we can connect to Kafka at all
-if ! docker-compose -f ../../docker-compose.yml exec -T cli-tools kafka-topics \
+if ! docker-compose -f $DOCKER_COMPOSE_FILE exec -T cli-tools kafka-topics \
     --bootstrap-server "$BROKER_ADDRESS" \
     --list > /tmp/kafka_topics_$$ 2> /tmp/kafka_error_$$; then
     
     if grep -q "TimeoutException\|Connection.*refused\|Broker may not be available" /tmp/kafka_error_$$; then
         print_error "Cannot connect to Kafka cluster at $BROKER_ADDRESS"
-        print_warning "Check if Kafka cluster is running and accessible"
-        print_warning "Try: docker-compose ps (to check broker status)"
     else
         print_error "Failed to list Kafka topics"
         print_warning "Error details:"
@@ -154,10 +145,6 @@ fi
 # Now check if the specific topic exists
 if ! grep -q "^${TOPIC_NAME}$" /tmp/kafka_topics_$$; then
     print_error "Topic '$TOPIC_NAME' does not exist in Kafka cluster"
-    print_warning "Available topics:"
-    cat /tmp/kafka_topics_$$
-    print_warning "Run producer_e2e_test.sh first to create topic and produce messages"
-    rm -f /tmp/kafka_topics_$$ /tmp/kafka_error_$$
     exit 1
 fi
 
@@ -168,18 +155,16 @@ print_success "Topic '$TOPIC_NAME' exists and Kafka cluster is accessible"
 print_step "Starting $INSTANCES consumer instances for ${DURATION} seconds..."
 
 # Scale up consumer instances
-docker-compose -f ../../docker-compose.yml up -d --scale go-consumer="$INSTANCES"
-
 print_warning "Starting consumers with native Kafka scaling:"
+docker-compose -f $DOCKER_COMPOSE_FILE up -d --scale go-consumer="$INSTANCES"
 echo ""
 
 # Start consumer processes in each instance
-PIDS=()
 for i in $(seq 1 "$INSTANCES"); do
     container_name="kafka-go-http-gateway-go-consumer-$i"
     echo "Starting consumer instance $i in container: $container_name"
     
-    # Start consumer in background and capture PID
+    # Start consumers
     docker exec "$container_name" go run . \
         -broker "$BROKER_ADDRESS" \
         -topic "$TOPIC_NAME" \
@@ -189,29 +174,22 @@ for i in $(seq 1 "$INSTANCES"); do
         -timeout 10 \
         -retries 2 \
         -retry-delay 1 &
-    
-    PIDS+=($!)
 done
 
-echo "All $INSTANCES consumer instances started!"
-echo "Let them run for ${DURATION} seconds to process messages..."
+echo "All $INSTANCES consumer instances started! (running for a max ${DURATION} seconds)"
 sleep "$DURATION"
 
 # Kill all background processes
 echo "Stopping all consumer instances..."
-for pid in "${PIDS[@]}"; do
-    kill "$pid" 2>/dev/null || true
-done
+docker-compose -f $DOCKER_COMPOSE_FILE up -d --scale go-consumer="0"
 
 # Wait for processes to terminate
 sleep 2
-
-echo ""
 print_success "Consumer E2E test completed"
 
 # Show topic status after consumption
 print_step "Checking remaining messages in topic..."
-REMAINING_MESSAGES=$(docker-compose -f ../../docker-compose.yml exec -T cli-tools kafka-run-class \
+REMAINING_MESSAGES=$(docker-compose -f $DOCKER_COMPOSE_FILE exec -T cli-tools kafka-run-class \
     kafka.tools.ConsumerGroupCommand \
     --bootstrap-server "$BROKER_ADDRESS" \
     --group "$CONSUMER_GROUP" \

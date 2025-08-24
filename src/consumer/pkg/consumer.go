@@ -36,7 +36,7 @@ type Config struct {
 //
 // PROCESSING FLOW:
 // 1. Message received → NOT acknowledged yet
-// 2. Process with immediate retries (1-3 attempts)  
+// 2. Process with immediate retries (1-3 attempts)
 // 3. After success OR all retries exhausted → Message acknowledged
 // 4. If consumer crashes during step 2 → Message redelivered (retries restart)
 //
@@ -211,7 +211,6 @@ func (c *Consumer) Cleanup(sarama.ConsumerGroupSession) error {
 	return nil
 }
 
-
 // ConsumeClaim implements sarama.ConsumerGroupHandler
 func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	log.Printf("[%s] Starting to consume partition %d", c.instanceID, claim.Partition())
@@ -233,19 +232,19 @@ func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 
 			// Process message directly (single-threaded per partition)
 			success := c.processMessage(message)
-			
+
 			// Always mark message after processing completes, regardless of success/failure
 			// This ensures:
 			// - Successful messages are ACK'd
 			// - Failed messages (after all retries) are also ACK'd to prevent infinite redelivery
 			// - Only consumer crashes during processing will cause message redelivery
 			session.MarkMessage(message, "")
-			
+
 			if success {
-				log.Printf("[%s] Message processed successfully - marked for commit - partition %d, offset %d", 
+				log.Printf("[%s:p%d:o%d] Message - marked for commit",
 					c.instanceID, message.Partition, message.Offset)
 			} else {
-				log.Printf("[%s] Message processing failed after all retries - marked for commit to prevent infinite redelivery - partition %d, offset %d", 
+				log.Printf("[%s:p%d:o%d] Message failed after all retries - marked for commit to prevent infinite redelivery",
 					c.instanceID, message.Partition, message.Offset)
 			}
 
@@ -261,11 +260,11 @@ func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 // This function uses inline retries with blocking delays to preserve strict message ordering.
 // When a message fails, the partition processing blocks and retries in-place rather than moving to the next message.
 // This ensures messages are processed in the exact order they appear in each Kafka partition.
-// 
+//
 // Since each consumer instance processes partitions single-threaded, perfect ordering is guaranteed.
 //
 // DELIVERY GUARANTEE:
-// - AT-LEAST-ONCE: Messages are ACK'd after processing completes (success OR exhausted retries)  
+// - AT-LEAST-ONCE: Messages are ACK'd after processing completes (success OR exhausted retries)
 // - This prevents infinite redelivery loops while maintaining crash recovery
 // - On consumer restart/rebalance, unprocessed messages are automatically redelivered by Kafka
 //
@@ -310,8 +309,8 @@ func (c *Consumer) processMessage(message *sarama.ConsumerMessage) bool {
 	for attempt := 0; attempt <= c.config.RetryAttempts; attempt++ {
 		if c.sendHTTPRequest(payload, attempt) {
 			duration := time.Since(startTime)
-			log.Printf("[%s] Message processed successfully in %v - offset %d, partition %d",
-				c.instanceID, duration, message.Offset, message.Partition)
+			log.Printf("[%s:p%d:o%d] Message sent successfully in %v",
+				c.instanceID, message.Partition, message.Offset, duration)
 			return true // Success - ACK message
 		}
 
@@ -323,8 +322,8 @@ func (c *Consumer) processMessage(message *sarama.ConsumerMessage) bool {
 	}
 
 	duration := time.Since(startTime)
-	log.Printf("[%s] Failed to process message after %d attempts in %v - offset %d, partition %d",
-		c.instanceID, c.config.RetryAttempts+1, duration, message.Offset, message.Partition)
+	log.Printf("[%s:p%d:o%d] Permanently failed to process message after %d attempts in %v",
+		c.instanceID, message.Partition, message.Offset, c.config.RetryAttempts+1, duration)
 	return false // Failure - still ACK to prevent infinite redelivery
 }
 
@@ -347,18 +346,18 @@ func (c *Consumer) sendHTTPRequest(payload MessagePayload, attempt int) bool {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Printf("[%s] HTTP request failed (attempt %d): %v", c.instanceID, attempt+1, err)
+		log.Printf("[%s:p%d:o%d] HTTP request failed (attempt %d): %v",
+			c.instanceID, payload.Partition, payload.Offset, attempt+1, err)
 		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		log.Printf("[%s] Message sent successfully - offset %d, partition %d",
-			c.instanceID, payload.Offset, payload.Partition)
 		return true
 	}
 
-	log.Printf("[%s] HTTP request failed with status %d (attempt %d) - offset %d, partition %d",
-		c.instanceID, resp.StatusCode, attempt+1, payload.Offset, payload.Partition)
+	log.Printf("[%s:p%d:o%d] HTTP request failed with status %d (attempt %d)",
+		c.instanceID, payload.Partition, payload.Offset, resp.StatusCode, attempt+1)
+
 	return false
 }
