@@ -33,10 +33,12 @@ HTTP-to-Kafka bidirectional gateway with Go and Sarama
 - **Kafka Producer** (`src/producer/`) - Gin web service with `/produce`, `/health`, `/webhook-simulator` (for testing purposes)
 - **Kafka Consumer** (`src/consumer/`) - Standalone CLI that forwards Kafka messages to HTTP endpoints  
   - *Delivery Guarantee*: **AT-LEAST-ONCE** (messages ACK'd only after complete processing)
+  - *Message Ordering*: **PERFECT PER-PARTITION** (single-threaded processing per partition)
+  - *Scaling*: **KAFKA-NATIVE** (multiple consumer instances auto-distribute partitions)
   - *Retry Strategy*: Immediate retries (1-3 attempts) within same session for fast failure recovery
   - *Crash Recovery*: Messages redelivered only if consumer crashes during processing and before ack
-  - *Processing Flow*: Message → Worker retries → ACK (regardless of final success/failure)
-  - *Trade-off*: Excellent immediate retry + crash safety, but crash during retries restarts retry counter
+  - *Processing Flow*: Message → Inline retries → ACK (regardless of final success/failure)
+  - *Trade-off*: Perfect ordering + crash safety, but crash during retries restarts retry counter
 - **Kafka Cluster** - Test 3-broker fault-tolerant setup with Zookeeper
 
 ## 📁 Project Structure
@@ -58,7 +60,7 @@ kafka-go-http-gateway/
     │       ├── producer_e2e_test.sh   # End-to-end HTTP → Kafka pipeline
     │       └── *_test.go              # Unit & integration tests
     └── consumer/                      # Kafka-to-HTTP consumer CLI
-        ├── main.go, pkg/              # Consumer & worker implementation
+        ├── main.go, pkg/              # Consumer implementation with native Kafka scaling
         └── test/                      # Container-based test suite
             ├── test.sh                # Run all tests in containers
             ├── consumer_e2e_test.sh   # End-to-end Kafka → HTTP pipeline
@@ -132,20 +134,24 @@ POST http://localhost:6969/webhook-simulator
 
 **Kafka Consumer CLI:**
 ```bash
+# Single instance (development)
 docker-compose exec go-consumer go run . \
   -broker broker0:29092 \
   -topic my-topic \  
   -target-url http://api.example.com/webhook \
-  -workers 5 -rate 10.0
+  -rate 10.0
+
+# Multiple instances (production scaling)
+docker-compose up --scale go-consumer=15  # Scale to match partition count
 ```
 
 Please note, the webhook simulates failures and delays
 
 ## 📊 Configuration
 
-**Kafka:** 3 brokers (localhost:9092-9094), replication factor 3  
+**Kafka:** 3 brokers (localhost:9092-9094), replication factor 3, 15 partitions (default)  
 **Kafka Producer:** Port 6969, Gin web service  
-**Kafka Consumer:** Standalone CLI, rate limiting, retries, concurrent workers
+**Kafka Consumer:** Standalone CLI, single-threaded per partition, perfect ordering, native Kafka scaling
 
 ## 👥 Credits
 

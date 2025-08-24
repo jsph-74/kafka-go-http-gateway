@@ -18,7 +18,8 @@
       "Bash(go test:*)",
       "Bash(mkdir:*)",
       "Bash(docker run:*)",
-      "Bash(docker-compose build:*)"
+      "Bash(docker-compose build:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
