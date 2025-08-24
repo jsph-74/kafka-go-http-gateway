@@ -17,7 +17,6 @@ type CLIConfig struct {
 	Topic         string
 	ConsumerGroup string
 	TargetURL     string
-	MaxWorkers    int
 	RateLimit     float64
 	HTTPTimeout   time.Duration
 	RetryAttempts int
@@ -32,7 +31,6 @@ func ParseFlags() *CLIConfig {
 	flag.StringVar(&config.Topic, "topic", "", "Kafka topic to consume from")
 	flag.StringVar(&config.ConsumerGroup, "group", "http-consumer", "Consumer group ID")
 	flag.StringVar(&config.TargetURL, "target-url", "", "Target HTTP URL to send messages to")
-	flag.IntVar(&config.MaxWorkers, "workers", 5, "Maximum number of concurrent workers")
 	flag.Float64Var(&config.RateLimit, "rate", 10.0, "Rate limit in messages per second")
 
 	var httpTimeoutSeconds int
@@ -77,9 +75,6 @@ func (c *CLIConfig) ValidateAndSetDefaults() error {
 	if c.ConsumerGroup == "" {
 		c.ConsumerGroup = "http-consumer-default"
 	}
-	if c.MaxWorkers <= 0 {
-		c.MaxWorkers = 15
-	}
 	if c.RateLimit <= 0 {
 		c.RateLimit = 10.0
 	}
@@ -103,7 +98,6 @@ func (c *CLIConfig) ToConfig() Config {
 		Topic:         c.Topic,
 		ConsumerGroup: c.ConsumerGroup,
 		TargetURL:     c.TargetURL,
-		MaxWorkers:    c.MaxWorkers,
 		RateLimit:     c.RateLimit,
 		HTTPTimeout:   c.HTTPTimeout,
 		RetryAttempts: c.RetryAttempts,
@@ -127,7 +121,6 @@ Required Options:
 
 Optional Options:
   -group string       Consumer group ID (default: "http-consumer")
-  -workers int        Maximum concurrent workers (default: 5)
   -rate float         Rate limit in messages per second (default: 10.0)
   -timeout int        HTTP timeout in seconds (default: 30)
   -retries int        Number of retry attempts (default: 3)
@@ -138,15 +131,15 @@ Examples:
   # Basic usage
   %s -broker localhost:9092 -topic orders -target-url http://api.example.com/webhook
 
-  # With custom rate limiting and workers
+  # With custom rate limiting and timeouts
   %s -broker localhost:9092 -topic events \
     -target-url http://slow-api.com/process \
-    -workers 2 -rate 5.0 -timeout 60
+    -rate 5.0 -timeout 60
 
-  # High throughput setup
+  # High throughput setup (scale by running multiple instances)
   %s -broker kafka1:9092 -topic high-volume \
     -target-url http://fast-api.com/bulk \
-    -workers 20 -rate 100.0 -timeout 10
+    -rate 100.0 -timeout 10
 
 Message Format:
   The consumer sends messages to the target URL as JSON with this structure:
@@ -160,10 +153,12 @@ Message Format:
   }
 
 Behavior:
-  - Messages are processed with respect to rate limiting and worker concurrency
-  - Only HTTP 200 responses will result in message acknowledgment
-  - Failed messages are retried with exponential backoff
-  - Consumer gracefully handles Kafka rebalancing
+  - Each consumer instance processes partitions single-threaded (perfect ordering)
+  - Messages are processed with respect to rate limiting per consumer instance
+  - Failed messages are retried immediately (not exponential backoff)
+  - Messages are acknowledged after success OR exhausted retries (at-least-once delivery)
+  - Consumer gracefully handles Kafka rebalancing and partition redistribution
+  - Scale throughput by running multiple consumer instances
   - Ctrl+C for graceful shutdown
 
 `, os.Args[0], os.Args[0], os.Args[0], os.Args[0])
@@ -189,7 +184,6 @@ func RunConsumerFromEnv() error {
 		Topic:         getEnv("TOPIC", "test-topic"),
 		ConsumerGroup: getEnv("CONSUMER_GROUP", "http-consumer"),
 		TargetURL:     getEnv("TARGET_URL", "http://localhost:6969/webhook-simulator"),
-		MaxWorkers:    getEnvInt("WORKERS", 3),
 		RateLimit:     getEnvFloat("RATE_LIMIT", 10.0),
 		HTTPTimeout:   time.Duration(getEnvInt("HTTP_TIMEOUT", 30)) * time.Second,
 		RetryAttempts: getEnvInt("RETRY_ATTEMPTS", 3),

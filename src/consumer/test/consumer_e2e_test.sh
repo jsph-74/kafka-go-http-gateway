@@ -28,15 +28,15 @@ print_error() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 <broker_address> <topic_name> <target_url> [duration] [workers] [rate_limit]"
+    echo "Usage: $0 <broker_address> <topic_name> <target_url> [duration] [instances] [rate_limit]"
     echo ""
     echo "Parameters:"
     echo "  broker_address: Kafka broker address (e.g., broker0:29092 for container network, localhost:9092 for host)"
     echo "  topic_name:     Kafka topic name to consume from"
     echo "  target_url:     HTTP endpoint to send messages to (e.g., http://go-producer:6969/webhook-simulator)"
     echo "  duration:       How long to run consumer in seconds (default: 60)"
-    echo "  workers:        Number of concurrent workers (default: 5)"
-    echo "  rate_limit:     Messages per second limit (default: 10.0)"
+    echo "  instances:      Number of consumer instances to run (default: 3)"
+    echo "  rate_limit:     Messages per second limit per instance (default: 10.0)"
     echo ""
     echo "Example (container network):"
     echo "  $0 broker0:29092 test-topic http://go-producer:6969/webhook-simulator"
@@ -56,8 +56,8 @@ BROKER_ADDRESS="$1"
 TOPIC_NAME="$2"
 TARGET_URL="$3"
 DURATION="${4:-60}"
-WORKERS="${5:-3}"
-RATE_LIMIT="${6:-25.0}"
+INSTANCES="${5:-3}"
+RATE_LIMIT="${6:-10.0}"
 
 # Generate consistent consumer group name that we'll use throughout
 CONSUMER_GROUP="e2e-consumer-$(date +%s)"
@@ -71,8 +71,8 @@ if ! [[ "$DURATION" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-if ! [[ "$WORKERS" =~ ^[0-9]+$ ]]; then
-    print_error "Workers must be a positive integer"
+if ! [[ "$INSTANCES" =~ ^[0-9]+$ ]]; then
+    print_error "Instances must be a positive integer"
     exit 1
 fi
 
@@ -86,8 +86,8 @@ echo "  Broker Address:  $BROKER_ADDRESS"
 echo "  Topic Name:      $TOPIC_NAME"
 echo "  Target URL:      $TARGET_URL"
 echo "  Duration:        ${DURATION}s"
-echo "  Workers:         $WORKERS"
-echo "  Rate Limit:      $RATE_LIMIT msg/sec"
+echo "  Instances:       $INSTANCES"
+echo "  Rate Limit:      $RATE_LIMIT msg/sec per instance"
 echo "  Consumer Group:  $CONSUMER_GROUP"
 echo ""
 
@@ -164,21 +164,47 @@ fi
 rm -f /tmp/kafka_topics_$$ /tmp/kafka_error_$$
 print_success "Topic '$TOPIC_NAME' exists and Kafka cluster is accessible"
 
-# Run consumer inside consumer container
-print_step "Starting consumer inside consumer container for ${DURATION} seconds..."
-print_warning "Consumer output:"
+# Run multiple consumer instances
+print_step "Starting $INSTANCES consumer instances for ${DURATION} seconds..."
+
+# Scale up consumer instances
+docker-compose -f ../../docker-compose.yml up -d --scale go-consumer="$INSTANCES"
+
+print_warning "Starting consumers with native Kafka scaling:"
 echo ""
-docker-compose -f ../../docker-compose.yml exec -T go-consumer timeout "$DURATION" go run . \
-    -broker "$BROKER_ADDRESS" \
-    -topic "$TOPIC_NAME" \
-    -target-url "$TARGET_URL" \
-    -workers "$WORKERS" \
-    -rate "$RATE_LIMIT" \
-    -group "$CONSUMER_GROUP" \
-    -timeout 10 \
-    -retries 2 \
-    -retry-delay 1 \
-    2>&1 || true
+
+# Start consumer processes in each instance
+PIDS=()
+for i in $(seq 1 "$INSTANCES"); do
+    container_name="kafka-go-http-gateway-go-consumer-$i"
+    echo "Starting consumer instance $i in container: $container_name"
+    
+    # Start consumer in background and capture PID
+    docker exec "$container_name" go run . \
+        -broker "$BROKER_ADDRESS" \
+        -topic "$TOPIC_NAME" \
+        -target-url "$TARGET_URL" \
+        -rate "$RATE_LIMIT" \
+        -group "$CONSUMER_GROUP" \
+        -timeout 10 \
+        -retries 2 \
+        -retry-delay 1 &
+    
+    PIDS+=($!)
+done
+
+echo "All $INSTANCES consumer instances started!"
+echo "Let them run for ${DURATION} seconds to process messages..."
+sleep "$DURATION"
+
+# Kill all background processes
+echo "Stopping all consumer instances..."
+for pid in "${PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+done
+
+# Wait for processes to terminate
+sleep 2
 
 echo ""
 print_success "Consumer E2E test completed"

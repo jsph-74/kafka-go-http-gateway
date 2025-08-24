@@ -130,7 +130,6 @@ func TestCLIConfig_ValidateAndSetDefaults(t *testing.T) {
 				
 				// Check that defaults were set
 				assert.Equal(t, "http-consumer-default", tt.config.ConsumerGroup)
-				assert.Equal(t, 15, tt.config.MaxWorkers)
 				assert.Equal(t, 10.0, tt.config.RateLimit)
 				assert.Equal(t, 30*time.Second, tt.config.HTTPTimeout)
 				assert.Equal(t, 3, tt.config.RetryAttempts)
@@ -146,7 +145,6 @@ func TestCLIConfig_ToConfig(t *testing.T) {
 		Topic:         "test-topic",
 		ConsumerGroup: "test-group",
 		TargetURL:     "http://example.com",
-		MaxWorkers:    5,
 		RateLimit:     20.0,
 		HTTPTimeout:   60 * time.Second,
 		RetryAttempts: 2,
@@ -159,7 +157,6 @@ func TestCLIConfig_ToConfig(t *testing.T) {
 	assert.Equal(t, cliConfig.Topic, config.Topic)
 	assert.Equal(t, cliConfig.ConsumerGroup, config.ConsumerGroup)
 	assert.Equal(t, cliConfig.TargetURL, config.TargetURL)
-	assert.Equal(t, cliConfig.MaxWorkers, config.MaxWorkers)
 	assert.Equal(t, cliConfig.RateLimit, config.RateLimit)
 	assert.Equal(t, cliConfig.HTTPTimeout, config.HTTPTimeout)
 	assert.Equal(t, cliConfig.RetryAttempts, config.RetryAttempts)

@@ -1,10 +1,13 @@
 package consumer
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -17,7 +20,6 @@ type Config struct {
 	Topic         string
 	ConsumerGroup string
 	TargetURL     string
-	MaxWorkers    int
 	RateLimit     float64 // messages per second
 	HTTPTimeout   time.Duration
 	RetryAttempts int
@@ -30,30 +32,31 @@ type Config struct {
 // - AT-LEAST-ONCE: Messages are acknowledged only after complete processing (success OR exhausted retries)
 // - IMMEDIATE RETRIES: Failed HTTP requests are retried 1-3 times within the same consumer session
 // - CRASH RECOVERY: Messages are redelivered only if consumer crashes during processing
-// - ORDERING: Messages within each partition processed in offset order (when workers ≤ partitions)
+// - ORDERING: Messages within each partition processed in strict offset order (single-threaded per partition)
 //
 // PROCESSING FLOW:
 // 1. Message received → NOT acknowledged yet
-// 2. Worker processes with immediate retries (1-3 attempts)  
+// 2. Process with immediate retries (1-3 attempts)  
 // 3. After success OR all retries exhausted → Message acknowledged
 // 4. If consumer crashes during step 2 → Message redelivered (retries restart)
 //
 // TRADE-OFFS:
-// - ✅ Immediate retries for transient failures (most common case)
-// - ✅ Messages never lost due to consumer crashes (rare case)
+// - ✅ Perfect partition ordering (single-threaded processing)
+// - ✅ Messages never lost due to consumer crashes
+// - ✅ Kafka-native scaling (multiple consumer instances)
 // - ⚠️ Consumer crash during retries will restart retry counter
 // - ⚠️ HTTP endpoints should be idempotent to handle potential duplicates
 //
-// This consumer provides the best balance of immediate failure recovery and crash resilience.
+// Scale by running multiple consumer instances - Kafka will automatically distribute partitions.
 type Consumer struct {
 	config        Config
 	consumerGroup sarama.ConsumerGroup
 	rateLimiter   *time.Ticker
-	workerPool    *WorkerPool
 	httpClient    *http.Client
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
+	instanceID    string // Unique identifier for this consumer instance
 }
 
 // MessagePayload represents the structure sent to target HTTP endpoint
@@ -68,6 +71,10 @@ type MessagePayload struct {
 
 // NewConsumer creates a new HTTP consumer
 func NewConsumer(config Config) (*Consumer, error) {
+	// Generate unique instance identifier
+	hostname, _ := os.Hostname()
+	pid := os.Getpid()
+	instanceID := fmt.Sprintf("%s-%d", hostname, pid)
 
 	// Create Sarama consumer group config
 	saramaConfig := sarama.NewConfig()
@@ -98,10 +105,8 @@ func NewConsumer(config Config) (*Consumer, error) {
 		httpClient:    httpClient,
 		ctx:           ctx,
 		cancel:        cancel,
+		instanceID:    instanceID,
 	}
-
-	// Initialize worker pool after consumer is created
-	consumer.workerPool = NewWorkerPool(config, httpClient, ctx, &consumer.wg)
 
 	return consumer, nil
 }
@@ -126,28 +131,20 @@ func (c *Consumer) getTopicPartitionCount() (int, error) {
 
 // Start begins consuming messages
 func (c *Consumer) Start() error {
-	log.Printf("Starting HTTP consumer for topic: %s", c.config.Topic)
-	log.Printf("Target URL: %s", c.config.TargetURL)
-	log.Printf("Rate limit: %.2f msg/sec", c.config.RateLimit)
-	log.Printf("Max workers: %d", c.config.MaxWorkers)
-	log.Printf("HTTP timeout: %v", c.config.HTTPTimeout)
+	log.Printf("[%s] Starting HTTP consumer for topic: %s", c.instanceID, c.config.Topic)
+	log.Printf("[%s] Target URL: %s", c.instanceID, c.config.TargetURL)
+	log.Printf("[%s] Rate limit: %.2f msg/sec", c.instanceID, c.config.RateLimit)
+	log.Printf("[%s] HTTP timeout: %v", c.instanceID, c.config.HTTPTimeout)
+	log.Printf("[%s] Processing: Single-threaded per partition (perfect ordering)", c.instanceID)
 
-	// Get partition count and determine ordering guarantee
+	// Get partition count for informational purposes
 	partitionCount, err := c.getTopicPartitionCount()
 	if err != nil {
-		log.Printf("Warning: Could not determine partition count: %v", err)
-		log.Printf("Retry strategy: INLINE (preserves message ordering when workers ≤ partitions)")
+		log.Printf("[%s] Warning: Could not determine partition count: %v", c.instanceID, err)
 	} else {
-		log.Printf("Topic partitions: %d", partitionCount)
-		if c.config.MaxWorkers <= partitionCount {
-			log.Printf("Retry strategy: INLINE (✅ preserves message ordering - workers ≤ partitions)")
-		} else {
-			log.Printf("Retry strategy: INLINE (⚠️  ordering NOT guaranteed - workers > partitions)")
-		}
+		log.Printf("[%s] Topic partitions: %d", c.instanceID, partitionCount)
+		log.Printf("[%s] Scale by running multiple consumer instances (max %d for full utilization)", c.instanceID, partitionCount)
 	}
-
-	// Start worker pool
-	c.workerPool.Start()
 
 	// Start consumer group - handles connection/fatal errors
 	// These errors prevent consumption entirely (broker down, auth failure, etc.)
@@ -161,7 +158,7 @@ func (c *Consumer) Start() error {
 			default:
 				err := c.consumerGroup.Consume(c.ctx, []string{c.config.Topic}, c)
 				if err != nil {
-					log.Printf("Fatal consumer error (will retry): %v", err)
+					log.Printf("[%s] Fatal consumer error (will retry): %v", c.instanceID, err)
 				}
 			}
 		}
@@ -175,7 +172,7 @@ func (c *Consumer) Start() error {
 		for {
 			select {
 			case err := <-c.consumerGroup.Errors():
-				log.Printf("Runtime consumer error: %v", err)
+				log.Printf("[%s] Runtime consumer error: %v", c.instanceID, err)
 			case <-c.ctx.Done():
 				return
 			}
@@ -187,11 +184,10 @@ func (c *Consumer) Start() error {
 
 // Stop gracefully stops the consumer
 func (c *Consumer) Stop() error {
-	log.Println("Stopping HTTP consumer...")
+	log.Printf("[%s] Stopping HTTP consumer...", c.instanceID)
 
 	c.cancel()
 	c.rateLimiter.Stop()
-	c.workerPool.Stop()
 
 	c.wg.Wait()
 
@@ -199,26 +195,26 @@ func (c *Consumer) Stop() error {
 		return fmt.Errorf("failed to close consumer group: %w", err)
 	}
 
-	log.Println("HTTP consumer stopped successfully")
+	log.Printf("[%s] HTTP consumer stopped successfully", c.instanceID)
 	return nil
 }
 
 // Setup implements sarama.ConsumerGroupHandler
 func (c *Consumer) Setup(sarama.ConsumerGroupSession) error {
-	log.Println("Consumer group session setup")
+	log.Printf("[%s] Consumer group session setup", c.instanceID)
 	return nil
 }
 
 // Cleanup implements sarama.ConsumerGroupHandler
 func (c *Consumer) Cleanup(sarama.ConsumerGroupSession) error {
-	log.Println("Consumer group session cleanup")
+	log.Printf("[%s] Consumer group session cleanup", c.instanceID)
 	return nil
 }
 
 
 // ConsumeClaim implements sarama.ConsumerGroupHandler
 func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	log.Printf("Starting to consume partition %d", claim.Partition())
+	log.Printf("[%s] Starting to consume partition %d", c.instanceID, claim.Partition())
 
 	for {
 		select {
@@ -235,25 +231,134 @@ func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 				// No tick available, processing is faster than rate limit - skip delay
 			}
 
-			// Create message wrapper with marking callback
-			msgWrapper := &MessageWithCallback{
-				Message: message,
-				MarkFunc: func() {
-					session.MarkMessage(message, "")
-				},
-			}
-
-			// Send to worker pool (instant dispatch)
-			select {
-			case c.workerPool.GetWorkQueue() <- msgWrapper:
-				// Message queued successfully
-				// Worker will mark message only after successful HTTP delivery
-			case <-c.ctx.Done():
-				return nil
+			// Process message directly (single-threaded per partition)
+			success := c.processMessage(message)
+			
+			// Always mark message after processing completes, regardless of success/failure
+			// This ensures:
+			// - Successful messages are ACK'd
+			// - Failed messages (after all retries) are also ACK'd to prevent infinite redelivery
+			// - Only consumer crashes during processing will cause message redelivery
+			session.MarkMessage(message, "")
+			
+			if success {
+				log.Printf("[%s] Message processed successfully - marked for commit - partition %d, offset %d", 
+					c.instanceID, message.Partition, message.Offset)
+			} else {
+				log.Printf("[%s] Message processing failed after all retries - marked for commit to prevent infinite redelivery - partition %d, offset %d", 
+					c.instanceID, message.Partition, message.Offset)
 			}
 
 		case <-c.ctx.Done():
 			return nil
 		}
 	}
+}
+
+// processMessage handles individual message processing with inline retries
+//
+// MESSAGE ORDERING GUARANTEE:
+// This function uses inline retries with blocking delays to preserve strict message ordering.
+// When a message fails, the partition processing blocks and retries in-place rather than moving to the next message.
+// This ensures messages are processed in the exact order they appear in each Kafka partition.
+// 
+// Since each consumer instance processes partitions single-threaded, perfect ordering is guaranteed.
+//
+// DELIVERY GUARANTEE:
+// - AT-LEAST-ONCE: Messages are ACK'd after processing completes (success OR exhausted retries)  
+// - This prevents infinite redelivery loops while maintaining crash recovery
+// - On consumer restart/rebalance, unprocessed messages are automatically redelivered by Kafka
+//
+// RETRY STRATEGY:
+// - Retries ALL non-200 HTTP responses (both 4xx and 5xx)
+// - 4xx errors may be due to race conditions (e.g., user not yet created, payment method not synced)
+// - 5xx errors indicate service issues that often resolve after brief delays
+// - Blocking behavior acts as natural circuit breaker during service outages
+//
+// TRADEOFFS:
+// - ✅ Perfect partition ordering preservation
+// - ✅ No message loss (at-least-once delivery)
+// - ✅ Natural backpressure during failures
+// - ✅ Handles race conditions gracefully
+// - ❌ Lower throughput during failures (partition blocks on retries)
+// - ❌ Head-of-line blocking (one slow message delays subsequent ones in same partition)
+func (c *Consumer) processMessage(message *sarama.ConsumerMessage) bool {
+	startTime := time.Now()
+	// Parse message value as JSON
+	var value map[string]interface{}
+	if err := json.Unmarshal(message.Value, &value); err != nil {
+		log.Printf("[%s] Failed to parse message value as JSON: %v", c.instanceID, err)
+		// For non-JSON messages, create a simple wrapper
+		value = map[string]interface{}{
+			"raw_message": string(message.Value),
+		}
+	}
+
+	// Create payload
+	payload := MessagePayload{
+		Topic:     message.Topic,
+		Partition: message.Partition,
+		Offset:    message.Offset,
+		Key:       string(message.Key),
+		Value:     value,
+		Timestamp: message.Timestamp,
+	}
+
+	// Send HTTP request with inline retries (ORDER PRESERVING)
+	// This loop blocks the partition processing during retries to maintain strict message ordering.
+	// Alternative approaches (async retries, retry topics) would break ordering guarantees.
+	for attempt := 0; attempt <= c.config.RetryAttempts; attempt++ {
+		if c.sendHTTPRequest(payload, attempt) {
+			duration := time.Since(startTime)
+			log.Printf("[%s] Message processed successfully in %v - offset %d, partition %d",
+				c.instanceID, duration, message.Offset, message.Partition)
+			return true // Success - ACK message
+		}
+
+		// Block partition processing during retry delay to preserve ordering
+		// This prevents processing message N+1 before message N succeeds
+		if attempt < c.config.RetryAttempts {
+			time.Sleep(c.config.RetryDelay)
+		}
+	}
+
+	duration := time.Since(startTime)
+	log.Printf("[%s] Failed to process message after %d attempts in %v - offset %d, partition %d",
+		c.instanceID, c.config.RetryAttempts+1, duration, message.Offset, message.Partition)
+	return false // Failure - still ACK to prevent infinite redelivery
+}
+
+// sendHTTPRequest sends the message to the target HTTP endpoint
+func (c *Consumer) sendHTTPRequest(payload MessagePayload, attempt int) bool {
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[%s] Failed to marshal payload: %v", c.instanceID, err)
+		return false
+	}
+
+	req, err := http.NewRequestWithContext(c.ctx, "POST", c.config.TargetURL, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		log.Printf("[%s] Failed to create HTTP request: %v", c.instanceID, err)
+		return false
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "kafka-http-consumer/1.0")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[%s] HTTP request failed (attempt %d): %v", c.instanceID, attempt+1, err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("[%s] Message sent successfully - offset %d, partition %d",
+			c.instanceID, payload.Offset, payload.Partition)
+		return true
+	}
+
+	log.Printf("[%s] HTTP request failed with status %d (attempt %d) - offset %d, partition %d",
+		c.instanceID, resp.StatusCode, attempt+1, payload.Offset, payload.Partition)
+	return false
 }

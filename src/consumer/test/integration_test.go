@@ -119,7 +119,6 @@ func TestConsumerRateLimiting(t *testing.T) {
 		BrokerAddress: "broker0:29092", // Won't be used with mock
 		Topic:        "test-topic",
 		TargetURL:    mockServer.URL,
-		MaxWorkers:   5,
 		RateLimit:    2.0, // 2 messages per second
 		HTTPTimeout:  1 * time.Second,
 	}
@@ -489,7 +488,6 @@ func TestKafkaToHTTPPipeline(t *testing.T) {
 		Topic:         testTopic,
 		TargetURL:     mockServer.URL,
 		ConsumerGroup: fmt.Sprintf("integration-test-%d", time.Now().UnixNano()),
-		MaxWorkers:    1, // Single worker for predictable testing
 		RateLimit:     10.0,
 		HTTPTimeout:   5 * time.Second,
 		RetryAttempts: 1,
@@ -507,8 +505,11 @@ func TestKafkaToHTTPPipeline(t *testing.T) {
 		kafkaConsumer.Start()
 	}()
 
-	// Wait for message processing
-	maxWaitTime := 8 * time.Second
+	// Allow consumer to fully initialize and join consumer group
+	time.Sleep(2 * time.Second)
+
+	// Wait for message processing (increased timeout for consumer group rebalancing)
+	maxWaitTime := 15 * time.Second
 	checkInterval := 500 * time.Millisecond
 	deadline := time.Now().Add(maxWaitTime)
 
@@ -550,7 +551,6 @@ func TestNewConsumer(t *testing.T) {
 		Topic:         "test-topic",
 		TargetURL:     "http://example.com",
 		ConsumerGroup: "test-group",
-		MaxWorkers:    5,
 		RateLimit:     10.0,
 		HTTPTimeout:   30 * time.Second,
 		RetryAttempts: 3,
