@@ -68,34 +68,6 @@ type MessagePayload struct {
 
 // NewConsumer creates a new HTTP consumer
 func NewConsumer(config Config) (*Consumer, error) {
-	// Validate configuration
-	if config.BrokerAddress == "" {
-		return nil, fmt.Errorf("broker address is required")
-	}
-	if config.Topic == "" {
-		return nil, fmt.Errorf("topic is required")
-	}
-	if config.TargetURL == "" {
-		return nil, fmt.Errorf("target URL is required")
-	}
-	if config.ConsumerGroup == "" {
-		config.ConsumerGroup = "http-consumer-default"
-	}
-	if config.MaxWorkers <= 0 {
-		config.MaxWorkers = 10
-	}
-	if config.RateLimit <= 0 {
-		config.RateLimit = 10 // default 10 messages per second
-	}
-	if config.HTTPTimeout <= 0 {
-		config.HTTPTimeout = 30 * time.Second
-	}
-	if config.RetryAttempts <= 0 {
-		config.RetryAttempts = 3
-	}
-	if config.RetryDelay <= 0 {
-		config.RetryDelay = 1 * time.Second
-	}
 
 	// Create Sarama consumer group config
 	saramaConfig := sarama.NewConfig()

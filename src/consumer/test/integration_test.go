@@ -544,67 +544,24 @@ func TestKafkaToHTTPPipeline(t *testing.T) {
 // Additional integration tests moved from consumer_test.go
 
 func TestNewConsumer(t *testing.T) {
-	tests := []struct {
-		name      string
-		config    consumer.Config
-		expectErr bool
-	}{
-		{
-			name: "valid config",
-			config: consumer.Config{
-				BrokerAddress: "broker0:29092",
-				Topic:         "test-topic",
-				TargetURL:     "http://example.com",
-				ConsumerGroup: "test-group",
-				MaxWorkers:    5,
-				RateLimit:     10.0,
-				HTTPTimeout:   30 * time.Second,
-				RetryAttempts: 3,
-				RetryDelay:    1 * time.Second,
-			},
-			expectErr: false,
-		},
-		{
-			name: "missing broker address",
-			config: consumer.Config{
-				Topic:     "test-topic",
-				TargetURL: "http://example.com",
-			},
-			expectErr: true,
-		},
-		{
-			name: "missing topic",
-			config: consumer.Config{
-				BrokerAddress: "broker0:29092",
-				TargetURL:     "http://example.com",
-			},
-			expectErr: true,
-		},
-		{
-			name: "missing target URL",
-			config: consumer.Config{
-				BrokerAddress: "broker0:29092",
-				Topic:         "test-topic",
-			},
-			expectErr: true,
-		},
+	// Test valid consumer creation (validation is now handled by CLI)
+	config := consumer.Config{
+		BrokerAddress: "broker0:29092",
+		Topic:         "test-topic",
+		TargetURL:     "http://example.com",
+		ConsumerGroup: "test-group",
+		MaxWorkers:    5,
+		RateLimit:     10.0,
+		HTTPTimeout:   30 * time.Second,
+		RetryAttempts: 3,
+		RetryDelay:    1 * time.Second,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			consumer, err := consumer.NewConsumer(tt.config)
-			
-			if tt.expectErr {
-				assert.Error(t, err)
-				assert.Nil(t, consumer)
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, consumer)
-				if consumer != nil {
-					consumer.Stop()
-				}
-			}
-		})
+	consumer, err := consumer.NewConsumer(config)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer)
+	if consumer != nil {
+		consumer.Stop()
 	}
 }
 

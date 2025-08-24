@@ -61,8 +61,8 @@ func ParseFlags() *CLIConfig {
 	return config
 }
 
-// Validate checks if the configuration is valid
-func (c *CLIConfig) Validate() error {
+// ValidateAndSetDefaults checks if the configuration is valid and sets defaults
+func (c *CLIConfig) ValidateAndSetDefaults() error {
 	if c.BrokerAddress == "" {
 		return fmt.Errorf("broker address is required (use -broker)")
 	}
@@ -72,20 +72,25 @@ func (c *CLIConfig) Validate() error {
 	if c.TargetURL == "" {
 		return fmt.Errorf("target URL is required (use -target-url)")
 	}
+
+	// Set defaults for optional parameters
+	if c.ConsumerGroup == "" {
+		c.ConsumerGroup = "http-consumer-default"
+	}
 	if c.MaxWorkers <= 0 {
-		return fmt.Errorf("workers must be greater than 0")
+		c.MaxWorkers = 15
 	}
 	if c.RateLimit <= 0 {
-		return fmt.Errorf("rate limit must be greater than 0")
+		c.RateLimit = 10.0
 	}
 	if c.HTTPTimeout <= 0 {
-		return fmt.Errorf("timeout must be greater than 0")
+		c.HTTPTimeout = 30 * time.Second
 	}
-	if c.RetryAttempts < 0 {
-		return fmt.Errorf("retry attempts must be non-negative")
+	if c.RetryAttempts == 0 {
+		c.RetryAttempts = 3
 	}
 	if c.RetryDelay <= 0 {
-		return fmt.Errorf("retry delay must be greater than 0")
+		c.RetryDelay = 1 * time.Second
 	}
 
 	return nil
@@ -168,7 +173,7 @@ Behavior:
 func RunConsumer() error {
 	cliConfig := ParseFlags()
 
-	if err := cliConfig.Validate(); err != nil {
+	if err := cliConfig.ValidateAndSetDefaults(); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
