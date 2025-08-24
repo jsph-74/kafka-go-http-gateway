@@ -84,36 +84,6 @@ kafka-go-http-gateway/
 ./bin/enchilada.sh 
 ```
 
-### 3. Individual Testing (Optional)
-
-**Producer Tests** (from `src/producer/`):
-```bash
-# Unit & integration tests
-./test/test.sh 
-
-# E2E HTTP → Kafka
-./test/producer_e2e_test.sh localhost:6969 broker0:29092 test-topic 5   
-```
-
-**Consumer Tests** (from `src/consumer/`):  
-```bash
-# Unit & integration tests  
-./test/test.sh 
-
-# E2EKafka → HTTP  
-./test/consumer_e2e_test.sh broker0:29092 test-topic http://go-producer:6969/webhook-simulator 30 3 2.0
-```
-
-**Manual E2E Pipeline:**
-```bash
-# Step 1: Send 10 messages to Kafka
-cd src/producer
-./test/producer_e2e_test.sh localhost:6969 broker0:29092 test-topic 10
-
-# Step 2: Consume and forward to HTTP
-cd ../consumer  
-./test/consumer_e2e_test.sh broker0:29092 test-topic http://go-producer:6969/webhook-simulator 30 3 5.0
-```
 
 ## 🌐 API Endpoints
 
@@ -131,6 +101,7 @@ GET http://localhost:6969/health
 # Test consumer url, simulating realistic errors and delays
 POST http://localhost:6969/webhook-simulator  
 ```
+Please note, the webhook simulates failures and delays
 
 **Kafka Consumer CLI:**
 ```bash
@@ -144,8 +115,6 @@ docker-compose exec go-consumer go run . \
 # Multiple instances (production scaling)
 docker-compose up --scale go-consumer=15  # Scale to match partition count
 ```
-
-Please note, the webhook simulates failures and delays
 
 ## 📊 Configuration
 
